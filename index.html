@@ -125,14 +125,42 @@
     
     <div class="footer-signature">BY: AstoBicalho - DEVELOPER</div>
 </div>
-
 <script>
-    const DB_NAME='StockOnMAN_DB', STORE_NAME='produtos', _MP='cafu123';
-    let db, searchTimeout, pedido=[];
-
+const DB_NAME='StockOnMAN_DB', STORE_NAME='produtos', _MP='cafu123';
+    let db, searchTimeout;
+    
+    // 1. CARREGA O CARRINHO SALVO OU CRIA UM NOVO
+    let pedido = JSON.parse(localStorage.getItem('carrinho_stockon')) || [];
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME, {keyPath:'codigo'});
-    request.onsuccess = e => { db = e.target.result; updateCount(); };
+    request.onsuccess = e => { 
+        db = e.target.result; 
+        updateCount(); 
+        renderizarPedido(); // Garante que o carrinho apareça ao abrir o app
+    };
+
+    // FUNÇÃO PARA SALVAR NO NAVEGADOR
+    function salvarCarrinho() {
+        localStorage.setItem('carrinho_stockon', JSON.stringify(pedido));
+    }
+
+    // --- LOGICA DE VOZ (STT) ---
+    const btnVoice = document.getElementById('start-voice');
+    const inputBusca = document.getElementById('busca');
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (Recognition) {
+        const recognition = new Recognition();
+        recognition.lang = 'pt-BR';
+        btnVoice.onclick = () => { recognition.start(); btnVoice.classList.add('listening'); };
+        recognition.onresult = (e) => {
+            inputBusca.value = e.results[0][0].transcript.replace('.', '');
+            btnVoice.classList.remove('listening');
+            debounceSearch();
+        };
+        recognition.onerror = () => btnVoice.classList.remove('listening');
+        recognition.onend = () => btnVoice.classList.remove('listening');
+    }
 
     function updateCount() {
         db.transaction([STORE_NAME],'readonly').objectStore(STORE_NAME).count().onsuccess = e => {
@@ -142,21 +170,19 @@
 
     function debounceSearch() {
         clearTimeout(searchTimeout);
-        if(document.getElementById('busca').value.length < 2) { document.getElementById('resultado').innerHTML = ''; return; }
+        if(inputBusca.value.length < 2) { document.getElementById('resultado').innerHTML = ''; return; }
         searchTimeout = setTimeout(buscar, 300);
     }
 
     function buscar() {
-        const t = document.getElementById('busca').value.toUpperCase().trim();
+        const t = inputBusca.value.toUpperCase().trim();
         let encontrados = [], idsUnicos = new Set();
         db.transaction([STORE_NAME], 'readonly').objectStore(STORE_NAME).openCursor().onsuccess = e => {
             const c = e.target.result;
             if (c) {
                 const p = c.value;
-                if (!idsUnicos.has(p.codigo)) {
-                    if (p.codigo.includes(t) || p.descricao.toUpperCase().includes(t)) {
-                        encontrados.push(p); idsUnicos.add(p.codigo);
-                    }
+                if (!idsUnicos.has(p.codigo) && (p.codigo.includes(t) || p.descricao.toUpperCase().includes(t))) {
+                    encontrados.push(p); idsUnicos.add(p.codigo);
                 }
                 c.continue();
             } else { renderizarBusca(encontrados); }
@@ -166,7 +192,7 @@
     function renderizarBusca(lista) {
         const r = document.getElementById('resultado');
         r.innerHTML = '';
-        lista.slice(0, 500).forEach(p => {
+        lista.slice(0, 100).forEach(p => {
             const isZerado = (p.estoque === "0" || p.estoque === 0);
             const div = document.createElement('div');
             div.className = 'result';
@@ -177,50 +203,23 @@
                 <div class="item-estoque ${isZerado ? 'estoque-critico' : ''}">
                     ${isZerado ? '⚠️ ZERADO' : 'Estoque: ' + p.estoque}
                 </div>
-                <p style="font-size:9px; opacity:0.4; margin:10px 0 5px 0;">(Toque e deslize para ver detalhes no zoom)</p>
                 <div class="img-box" onpointermove="zoomMove(event)" onpointerleave="zoomReset(event)" onpointerdown="zoomIn(event)" onpointerup="zoomReset(event)">
                     <img src="fotos/${p.codigo}.jpg" onerror="this.src='fotos/${p.codigo}.jpeg'; this.onerror=function(){this.parentElement.style.display='none'};">
                 </div>
-                <button class="btn-add" onclick="adicionarAoPedido('${p.codigo}', '${p.descricao}')">➕ ADICIONAR</button>
+                <button class="btn-add" onclick="adicionarAoPedido('${p.codigo}', '${p.descricao.replace(/'/g, "")}')">➕ ADICIONAR AO PEDIDO</button>
             `;
             r.appendChild(div);
         });
     }
 
-    // FUNÇÕES DE ZOOM DINÂMICO (ARRASTAR)
-    function zoomIn(e) {
-        const img = e.currentTarget.querySelector('img');
-        img.style.transform = "scale(3)";
-        zoomMove(e);
-    }
-
-    function zoomMove(e) {
-        const box = e.currentTarget;
-        const img = box.querySelector('img');
-        if (img.style.transform.includes("scale(3)")) {
-            const rect = box.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            
-            // Calcula a porcentagem do movimento para mover a origem do zoom
-            const xPercent = (x / rect.width) * 100;
-            const yPercent = (y / rect.height) * 100;
-            
-            img.style.transformOrigin = `${xPercent}% ${yPercent}%`;
-        }
-    }
-
-    function zoomReset(e) {
-        const img = e.currentTarget.querySelector('img');
-        img.style.transform = "scale(1)";
-        img.style.transformOrigin = "center";
-    }
-
+    // --- FUNÇÕES DO CARRINHO ---
     function adicionarAoPedido(c, d) {
         const q = prompt(`Qtd para ${c}:`, "1");
         if (q) {
             pedido.push({codigo: c, descricao: d, quantidade: q});
+            salvarCarrinho();
             renderizarPedido();
+            alert("Item adicionado! Role para baixo para ver o pedido.");
         }
     }
 
@@ -229,21 +228,57 @@
         l.innerHTML = '';
         if (pedido.length > 0) {
             b.style.display = 'block';
-            pedido.forEach((i, x) => l.innerHTML += `<div style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05)">${i.quantidade}x [${i.codigo}] - <button onclick="pedido.splice(${x},1);renderizarPedido();">X</button></div>`);
+            pedido.forEach((i, x) => {
+                l.innerHTML += `
+                <div style="padding:12px 0; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; justify-content:space-between; align-items:center;">
+                    <div style="flex:1;">
+                        <b style="color:var(--primary)">${i.quantidade}x</b> [${i.codigo}]<br>
+                        <small style="opacity:0.7; font-size:12px;">${i.descricao}</small>
+                    </div>
+                    <button onclick="removerItem(${x})" style="width:35px; height:35px; background:rgba(232, 51, 109, 0.1); color:var(--primary); border:1px solid var(--primary); border-radius:8px; font-size:14px;">X</button>
+                </div>`;
+            });
         } else b.style.display = 'none';
+    }
+
+    function removerItem(index) {
+        pedido.splice(index, 1);
+        salvarCarrinho();
+        renderizarPedido();
     }
 
     function enviarWhatsApp() {
         const o = document.getElementById('os_numero').value, m = document.getElementById('solicitante').value, t = document.getElementById('whatsapp_dest').value;
+        if(!o || !m) return alert("Preencha O.S e Mecânico!");
+        
         let s = `*STOCKON MAN*\n*OS:* ${o}\n*Mec:* ${m}\n\n`;
-        pedido.forEach(i => s += `• ${i.quantidade}x ${i.codigo}\n`);
+        pedido.forEach(i => s += `• ${i.quantidade}x ${i.codigo} (${i.descricao})\n`);
+        
         window.open(`https://api.whatsapp.com/send?phone=${t}&text=${encodeURIComponent(s)}`);
+        
+        // Limpa tudo após enviar
+        pedido = [];
+        salvarCarrinho();
+        renderizarPedido();
     }
 
+    // ZOOM E PROTEÇÕES
+    function zoomIn(e) { const img = e.currentTarget.querySelector('img'); img.style.transform = "scale(3)"; zoomMove(e); }
+    function zoomMove(e) {
+        const box = e.currentTarget; const img = box.querySelector('img');
+        if (img.style.transform.includes("scale(3)")) {
+            const rect = box.getBoundingClientRect();
+            const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
+            const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
+            img.style.transformOrigin = `${xPercent}% ${yPercent}%`;
+        }
+    }
+    function zoomReset(e) { const img = e.currentTarget.querySelector('img'); img.style.transform = "scale(1)"; img.style.transformOrigin = "center"; }
     function fazerLogin() { if(prompt("Senha:") === _MP) document.getElementById('adminBox').style.display='block'; }
 
     async function importarPlanilha() {
         const file = document.getElementById('excelFile').files[0];
+        if(!file) return alert("Selecione um arquivo!");
         const reader = new FileReader();
         reader.onload = e => {
             const data = new Uint8Array(e.target.result);
@@ -253,36 +288,13 @@
             for(let i = 1; i < rows.length; i++) {
                 if(rows[i][0]) tx.objectStore(STORE_NAME).put({codigo: String(rows[i][0]), descricao: String(rows[i][1]), man: String(rows[i][2]), estoque: String(rows[i][3])});
             }
-            tx.oncomplete = () => location.reload();
+            tx.oncomplete = () => { alert("Sincronizado!"); location.reload(); };
         };
         reader.readAsArrayBuffer(file);
     }
 
-/* --- PROTEÇÃO DO CONTEÚDO --- */
-
-// Bloquear Clique Direito
-document.addEventListener('contextmenu', event => event.preventDefault());
-
-// Bloquear Atalhos de Teclado (F12, Ctrl+Shift+I, Ctrl+U, etc)
-document.onkeydown = function(e) {
-    // F12
-    if (e.keyCode == 123) return false;
-    
-    // Ctrl+Shift+I (Inspecionar)
-    if (e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)) return false;
-    
-    // Ctrl+Shift+J (Console)
-    if (e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)) return false;
-    
-    // Ctrl+U (Exibir Código Fonte)
-    if (e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) return false;
-
-    // Ctrl+S (Salvar Página)
-    if (e.ctrlKey && e.keyCode == 'S'.charCodeAt(0)) return false;
-};
-
-// Bloquear Seleção de Texto (Opcional - se quiser que não copiem nada)
-// document.onselectstart = function() { return false; };
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.onkeydown = e => { if (e.keyCode == 123 || (e.ctrlKey && e.shiftKey && (e.keyCode == 73 || e.keyCode == 74)) || (e.ctrlKey && (e.keyCode == 85 || e.keyCode == 83))) return false; };
 </script>
 </body>
 </html>
