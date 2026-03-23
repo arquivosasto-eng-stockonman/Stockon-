@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>StockOn MAN | Terminal Logístico</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00283d">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root { 
+            --bg: rgb(0, 40, 61); 
+            --glass: rgba(255, 255, 255, 0.03); 
+            --glass-border: rgba(255, 255, 255, 0.08); 
+            --primary: rgb(232, 51, 109); 
+            --wire: rgb(232, 51, 109); 
+            --mustard: #ffdb58; 
+            --text: #f0f4f8;
+        }
+
+        * { -webkit-user-select: none; user-select: none; box-sizing: border-box; }
+        input { user-select: text !important; }
+
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background: radial-gradient(circle at top right, #1e293b, var(--bg)); 
+            color: var(--text); margin: 0; padding: 15px; 
+            display: flex; flex-direction: column; align-items: center; 
+            min-height: 100vh; overflow-x: hidden; 
+        }
+
+        .container { width: 100%; max-width: 450px; }
+
+        .header-logo { text-align: center; margin-bottom: 30px; }
+        .logo-img { width: 180px; filter: drop-shadow(0 0 15px rgba(232, 51, 109, 0.5)); }
+        
+        .status-pill { font-size: 10px; background: rgba(232, 51, 109, 0.1); color: var(--primary); border: 1px solid rgba(232, 51, 109, 0.3); padding: 4px 15px; border-radius: 20px; display: inline-block; }
+
+        .card { 
+            background: var(--glass); 
+            backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); 
+            border: 1px solid var(--glass-border); 
+            padding: 20px; border-radius: 20px; 
+            margin-bottom: 15px; position: relative; overflow: hidden; 
+        }
+
+        /* WIRE ACTION */
+        .card::after { 
+            content: ""; position: absolute; width: 100%; height: 1px; 
+            background: linear-gradient(90deg, transparent, var(--wire), transparent); 
+            bottom: 0; left: -100%; transition: 0.8s; 
+        }
+        .card:hover::after { left: 100%; }
+
+        input { width: 100%; padding: 14px; margin-bottom: 12px; border-radius: 12px; border: 1px solid var(--glass-border); background: rgba(0,0,0,0.3); color: white; font-size: 16px; outline: none; }
+        
+        button { width: 100%; padding: 14px; margin-bottom: 10px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; text-transform: uppercase; transition: 0.3s; }
+        .btn-add { background: var(--primary); color: #fff; margin-top: 15px; }
+        .btn-whatsapp { background: linear-gradient(45deg, #25d366, #128c7e); color: #fff; }
+
+        .result { background: rgba(255,255,255,0.02); border: 1px solid var(--glass-border); padding: 18px; border-radius: 15px; margin-top: 15px; }
+        .item-cod { font-size: 24px; color: var(--primary); font-weight: 900; }
+        .item-pos { font-size: 14px; color: #fff; font-weight: bold; padding: 4px 10px; border-radius: 6px; background: rgba(232, 51, 109, 0.2); float: right; }
+        .item-desc { font-weight: bold; font-size: 18px; color: #fff; margin: 10px 0; clear: both; }
+
+        .item-estoque { font-size: 13px; color: var(--mustard); font-weight: bold; }
+        .estoque-critico { color: #ff4d4d !important; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        /* BOX DE IMAGEM COM INTERAÇÃO DE ARRASTAR */
+        .img-box { 
+            width: 100%; height: 380px; margin: 15px 0; border-radius: 12px; 
+            border: 1px solid var(--glass-border); overflow: hidden; 
+            background: #0003; display: flex; justify-content: center; align-items: center;
+            position: relative; cursor: crosshair; touch-action: none;
+        }
+        .img-box img { 
+            max-width: 100%; max-height: 100%; object-fit: contain; 
+            pointer-events: none; transition: transform 0.1s ease-out;
+            transform-origin: center;
+        }
+
+        #adminBox { display: none; border: 1px solid var(--primary); }
+        .footer-signature { margin-top: 30px; font-size: 9px; opacity: 0.2; letter-spacing: 2px; text-align: center; }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+<div class="container">
+    <div class="header-logo">
+        <img src="logo.png" alt="MAN LOGO" class="logo-img">
+        <br>
+        <div id="count" class="status-pill">SISTEMA ATIVO</div>
+    </div>
+
+    <div class="card">
+        <input id="busca" type="text" placeholder="Pesquisar código ou peça..." oninput="debounceSearch()" autocomplete="off">
+        <div id="resultado"></div>
+    </div>
+
+    <div class="card" id="carrinhoBox" style="display:none;">
+        <h3 style="color: var(--primary); margin-top:0;">📝 Pedido</h3>
+        <div id="listaItens"></div>
+        <input id="os_numero" placeholder="Nº da O.S.:">
+        <input id="solicitante" placeholder="Mecânico:">
+        <input id="whatsapp_dest" placeholder="WhatsApp: Almoxarifado Manuteção">
+        <button onclick="enviarWhatsApp()" class="btn-whatsapp">ENVIAR PARA ALMOXARIFADO</button>
+    </div>
+
+    <div class="card" id="adminBox">
+        <input id="man_cod" placeholder="Código">
+        <input id="man_desc" placeholder="Descrição">
+        <input id="man_pos" placeholder="Posição">
+        <input id="man_qtd" placeholder="Estoque">
+        <button onclick="salvarManual()" class="btn-add">SALVAR</button>
+        <hr style="opacity:0.1">
+        <input type="file" id="excelFile">
+        <button onclick="importarPlanilha()" style="background:var(--mustard)">SINCRONIZAR EXCEL</button>
+    </div>
+
+    <div style="text-align:center">
+        <button onclick="fazerLogin()" style="background:transparent; color:rgba(255,255,255,0.01); font-size:10px;">ADMIN</button>
+    </div>
+    
+    <div class="footer-signature">BY: AstoBicalho - DEVELOPER</div>
+</div>
+
+<script>
+    const DB_NAME='StockOnMAN_DB', STORE_NAME='produtos', _MP='cafu123';
+    let db, searchTimeout, pedido=[];
+
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME, {keyPath:'codigo'});
+    request.onsuccess = e => { db = e.target.result; updateCount(); };
+
+    function updateCount() {
+        db.transaction([STORE_NAME],'readonly').objectStore(STORE_NAME).count().onsuccess = e => {
+            document.getElementById('count').innerText = `ESTOQUE: ${e.target.result} ITENS`;
+        };
+    }
+
+    function debounceSearch() {
+        clearTimeout(searchTimeout);
+        if(document.getElementById('busca').value.length < 2) { document.getElementById('resultado').innerHTML = ''; return; }
+        searchTimeout = setTimeout(buscar, 300);
+    }
+
+    function buscar() {
+        const t = document.getElementById('busca').value.toUpperCase().trim();
+        let encontrados = [], idsUnicos = new Set();
+        db.transaction([STORE_NAME], 'readonly').objectStore(STORE_NAME).openCursor().onsuccess = e => {
+            const c = e.target.result;
+            if (c) {
+                const p = c.value;
+                if (!idsUnicos.has(p.codigo)) {
+                    if (p.codigo.includes(t) || p.descricao.toUpperCase().includes(t)) {
+                        encontrados.push(p); idsUnicos.add(p.codigo);
+                    }
+                }
+                c.continue();
+            } else { renderizarBusca(encontrados); }
+        };
+    }
+
+    function renderizarBusca(lista) {
+        const r = document.getElementById('resultado');
+        r.innerHTML = '';
+        lista.slice(0, 500).forEach(p => {
+            const isZerado = (p.estoque === "0" || p.estoque === 0);
+            const div = document.createElement('div');
+            div.className = 'result';
+            div.innerHTML = `
+                <span class="item-pos">${p.man || 'S/N'}</span>
+                <span class="item-cod">${p.codigo}</span>
+                <div class="item-desc">${p.descricao}</div>
+                <div class="item-estoque ${isZerado ? 'estoque-critico' : ''}">
+                    ${isZerado ? '⚠️ ZERADO' : 'Estoque: ' + p.estoque}
+                </div>
+                <p style="font-size:9px; opacity:0.4; margin:10px 0 5px 0;">(Toque e deslize para ver detalhes no zoom)</p>
+                <div class="img-box" onpointermove="zoomMove(event)" onpointerleave="zoomReset(event)" onpointerdown="zoomIn(event)" onpointerup="zoomReset(event)">
+                    <img src="fotos/${p.codigo}.jpg" onerror="this.src='fotos/${p.codigo}.jpeg'; this.onerror=function(){this.parentElement.style.display='none'};">
+                </div>
+                <button class="btn-add" onclick="adicionarAoPedido('${p.codigo}', '${p.descricao}')">➕ ADICIONAR</button>
+            `;
+            r.appendChild(div);
+        });
+    }
+
+    // FUNÇÕES DE ZOOM DINÂMICO (ARRASTAR)
+    function zoomIn(e) {
+        const img = e.currentTarget.querySelector('img');
+        img.style.transform = "scale(3)";
+        zoomMove(e);
+    }
+
+    function zoomMove(e) {
+        const box = e.currentTarget;
+        const img = box.querySelector('img');
+        if (img.style.transform.includes("scale(3)")) {
+            const rect = box.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Calcula a porcentagem do movimento para mover a origem do zoom
+            const xPercent = (x / rect.width) * 100;
+            const yPercent = (y / rect.height) * 100;
+            
+            img.style.transformOrigin = `${xPercent}% ${yPercent}%`;
+        }
+    }
+
+    function zoomReset(e) {
+        const img = e.currentTarget.querySelector('img');
+        img.style.transform = "scale(1)";
+        img.style.transformOrigin = "center";
+    }
+
+    function adicionarAoPedido(c, d) {
+        const q = prompt(`Qtd para ${c}:`, "1");
+        if (q) {
+            pedido.push({codigo: c, descricao: d, quantidade: q});
+            renderizarPedido();
+        }
+    }
+
+    function renderizarPedido() {
+        const b = document.getElementById('carrinhoBox'), l = document.getElementById('listaItens');
+        l.innerHTML = '';
+        if (pedido.length > 0) {
+            b.style.display = 'block';
+            pedido.forEach((i, x) => l.innerHTML += `<div style="padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05)">${i.quantidade}x [${i.codigo}] - <button onclick="pedido.splice(${x},1);renderizarPedido();">X</button></div>`);
+        } else b.style.display = 'none';
+    }
+
+    function enviarWhatsApp() {
+        const o = document.getElementById('os_numero').value, m = document.getElementById('solicitante').value, t = document.getElementById('whatsapp_dest').value;
+        let s = `*STOCKON MAN*\n*OS:* ${o}\n*Mec:* ${m}\n\n`;
+        pedido.forEach(i => s += `• ${i.quantidade}x ${i.codigo}\n`);
+        window.open(`https://api.whatsapp.com/send?phone=${t}&text=${encodeURIComponent(s)}`);
+    }
+
+    function fazerLogin() { if(prompt("Senha:") === _MP) document.getElementById('adminBox').style.display='block'; }
+
+    async function importarPlanilha() {
+        const file = document.getElementById('excelFile').files[0];
+        const reader = new FileReader();
+        reader.onload = e => {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {header: 1});
+            const tx = db.transaction([STORE_NAME], 'readwrite');
+            for(let i = 1; i < rows.length; i++) {
+                if(rows[i][0]) tx.objectStore(STORE_NAME).put({codigo: String(rows[i][0]), descricao: String(rows[i][1]), man: String(rows[i][2]), estoque: String(rows[i][3])});
+            }
+            tx.oncomplete = () => location.reload();
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+/* --- PROTEÇÃO DO CONTEÚDO --- */
+
+// Bloquear Clique Direito
+document.addEventListener('contextmenu', event => event.preventDefault());
+
+// Bloquear Atalhos de Teclado (F12, Ctrl+Shift+I, Ctrl+U, etc)
+document.onkeydown = function(e) {
+    // F12
+    if (e.keyCode == 123) return false;
+    
+    // Ctrl+Shift+I (Inspecionar)
+    if (e.ctrlKey && e.shiftKey && e.keyCode == 'I'.charCodeAt(0)) return false;
+    
+    // Ctrl+Shift+J (Console)
+    if (e.ctrlKey && e.shiftKey && e.keyCode == 'J'.charCodeAt(0)) return false;
+    
+    // Ctrl+U (Exibir Código Fonte)
+    if (e.ctrlKey && e.keyCode == 'U'.charCodeAt(0)) return false;
+
+    // Ctrl+S (Salvar Página)
+    if (e.ctrlKey && e.keyCode == 'S'.charCodeAt(0)) return false;
+};
+
+// Bloquear Seleção de Texto (Opcional - se quiser que não copiem nada)
+// document.onselectstart = function() { return false; };
+</script>
+</body>
+</html>
